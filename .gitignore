@@ -1,0 +1,25 @@
+# Áudio: originais e processados nunca entram no Git (Decisão 1)
+media/originals/
+media/processed/
+
+# Logs do ingest
+logs/
+
+# Credenciais: config do rclone e variáveis locais ficam fora do repo
+rclone.conf
+*.conf.local
+.env
+.env.*
+
+# Python
+__pycache__/
+*.pyc
+
+# Node (testes do shuffle usam só node --test, sem dependências)
+node_modules/
+
+# Windows / editores
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

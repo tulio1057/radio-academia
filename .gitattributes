@@ -1,0 +1,9 @@
+# Fim de linha LF no repositório: arquivos gerados pelo ingest
+# (playlist.json, créditos) precisam de diff estável entre execuções no Windows.
+* text=auto eol=lf
+
+*.mp3  binary
+*.png  binary
+*.ico  binary
+*.wav  binary
+*.flac binary

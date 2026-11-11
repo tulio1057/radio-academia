@@ -1,0 +1,163 @@
+# Decisões de arquitetura
+
+Registro das decisões que ajustam a especificação original (`docs/POCF.md`).
+Onde houver conflito, vale este documento e o `CLAUDE.md`.
+
+Cada decisão tem: **contexto**, **decisão**, **alternativas descartadas** e **consequências**.
+
+Status: aguardando revisão do desenvolvedor (critério de pronto da Fase 0).
+
+---
+
+## 1. Ingestão local, sem GitHub Actions no MVP
+
+**Contexto.** O ingest precisa dos arquivos de áudio originais, do FFmpeg e de credenciais do R2.
+Os originais são grandes e não devem entrar no Git.
+
+**Decisão.** O ingest roda no Windows do desenvolvedor. Ele gera `site/playlist.json` e
+`site/creditos/index.html`, que são commitados. A integração Git do Cloudflare Pages publica
+o site a cada push.
+
+**Alternativas descartadas.**
+- GitHub Actions: exigiria guardar os originais em outro lugar acessível ao CI e manter
+  segredos do R2 no GitHub. Não se justifica com uma única pessoa editando o catálogo.
+
+**Consequências.**
+- Só quem tem os originais e o rclone configurado consegue adicionar músicas.
+- Os arquivos gerados no repositório precisam ser determinísticos para o diff fazer sentido.
+- Reavaliar quando houver mais de uma pessoa editando o catálogo.
+
+---
+
+## 2. Service worker escrito à mão, sem Workbox
+
+**Contexto.** O SW só precisa guardar os arquivos fixos do site e o `playlist.json`.
+
+**Decisão.** `site/sw.js` escrito à mão, com stale-while-revalidate e versão de cache.
+
+**Alternativas descartadas.**
+- Workbox: dependência e etapa de build para um problema de poucas dezenas de linhas.
+
+**Consequências.**
+- Atualizações de versão do cache são manuais (constante no `sw.js`).
+- Reavaliar se o SW ficar difícil de manter.
+
+---
+
+## 3. O player é o único dono do cache de MP3
+
+**Contexto.** O navegador pede áudio em partes (`Range`, resposta 206), e respostas parciais
+não podem ser guardadas no Cache API de forma confiável. Além disso, pré-carregamento e modo
+offline precisam do mesmo arquivo; dois mecanismos gerariam duas cópias e duas políticas de evicção.
+
+**Decisão.** O player baixa cada faixa inteira com `fetch()`, guarda no Cache API (cache
+`audio-v1`) e toca a partir de blob URL. O SW não intercepta nem guarda MP3. No máximo dois
+blobs em memória (faixa atual e próxima), sempre liberados com `URL.revokeObjectURL`.
+
+**Alternativas descartadas.**
+- SW com cache-first de MP3: conflito com respostas 206 e duplicação com o pré-carregamento.
+- `<audio src>` apontando direto para o R2: sem controle de timeout, sem offline.
+
+**Consequências.**
+- A faixa só começa a tocar depois do download completo (~4–5 MB a 128 kbps). Por isso a
+  próxima faixa é sempre pré-carregada durante a atual.
+- Falhas de rede são detectadas no `fetch()` (timeout com `AbortController`), não pelos
+  eventos `stalled`/`waiting` do elemento de áudio.
+
+---
+
+## 4. MP3 públicos no R2, servidos por domínio próprio
+
+**Contexto.** O Cloudflare Access protege o site no Pages, mas não o bucket R2. O endereço
+`r2.dev` tem limite de requisições e a Cloudflare não o recomenda para produção.
+
+**Decisão.** No MVP os MP3 são públicos, servidos por um domínio próprio ligado ao bucket
+(ex.: `audio.<dominio>`). O conteúdo é CC, então a exposição é aceitável.
+
+**Alternativas descartadas.**
+- `r2.dev`: limitado e não indicado para uso contínuo.
+- Domínio do bucket atrás do Access já no MVP: complexidade sem exigência do cliente.
+
+**Consequências.**
+- Exige um domínio gerenciado na Cloudflare.
+- Qualquer pessoa com a URL de um MP3 consegue baixá-lo.
+- Reavaliar se o cliente exigir áudio privado (colocar o domínio do bucket atrás do Access).
+
+---
+
+## 5. Licenças aceitas: CC0-1.0, CC-BY-3.0, CC-BY-4.0
+
+**Contexto.** A academia faz uso comercial da música. O ingest modifica o áudio
+(normalização de volume e corte de silêncio nas pontas).
+
+**Decisão.** Aceitar apenas `CC0-1.0`, `CC-BY-3.0` e `CC-BY-4.0`.
+
+**Alternativas descartadas.**
+- NC (NãoComercial): incompatível com uso em estabelecimento comercial.
+- ND (SemDerivações): a normalização pode ser considerada modificação da obra.
+- SA (CompartilhaIgual): exigiria licenciar a versão processada sob os mesmos termos;
+  evitado por cautela no MVP.
+
+**Consequências.**
+- Catálogo disponível menor.
+- Toda faixa BY exige atribuição visível: no player e na página de créditos.
+
+---
+
+## 6. ECAD
+
+**Contexto.** Uma licença CC não impede a cobrança por execução pública quando o autor ou
+intérprete é filiado a uma associação de gestão coletiva. Academias são alvo frequente
+de cobrança do ECAD.
+
+**Decisão.** Registrar o risco em `docs/licencas.md`, alertar o cliente por escrito e
+preferir artistas que declarem publicamente não serem filiados, guardando a evidência.
+
+**Alternativas descartadas.**
+- Ignorar o risco por ser conteúdo CC: a licença CC não substitui a gestão coletiva.
+
+**Consequências.**
+- A responsabilidade final pela execução pública é do cliente, e isso precisa estar claro.
+- A curadoria de faixas leva mais tempo.
+
+---
+
+## 7. Processamento de áudio conservador
+
+**Contexto.** Faixas de fontes diferentes têm volumes muito diferentes. Processamento
+agressivo pode alterar a obra e piorar o som.
+
+**Decisão.**
+- Corte de silêncio só nas pontas (abaixo de -50 dB, mínimo ~1 s), nunca no meio.
+- `loudnorm` em duas passagens (medir → aplicar, modo linear), alvo configurável entre
+  -14 e -16 LUFS, true peak -1,5 dBTP.
+- Saída MP3 CBR 128–160 kbps a 44,1 kHz.
+
+**Alternativas descartadas.**
+- `loudnorm` de uma passagem: usa compressão dinâmica, altera mais o som.
+- Corte de silêncio no meio: pode quebrar pausas que fazem parte da música.
+
+**Consequências.**
+- Se o alvo não puder ser atingido em modo linear, o FFmpeg cai para o modo dinâmico;
+  o ingest registra esse caso no log.
+- A margem de -1,5 dBTP evita distorção causada pelo encoder MP3.
+
+---
+
+## 8. Reprodução automática depende da máquina, não do código
+
+**Contexto.** O Chrome bloqueia áudio sem um gesto do usuário. O Wake Lock só funciona com
+a aba visível. A recepcionista não deve precisar configurar nada.
+
+**Decisão.**
+- O atalho de inicialização do Windows abre o Chrome com
+  `--app=URL --autoplay-policy=no-user-gesture-required`.
+- O plano de energia do Windows fica sem suspensão no horário de funcionamento.
+- Se a flag de autoplay não puder ser usada, a operação documenta "um clique em Play ao ligar".
+
+**Alternativas descartadas.**
+- Confiar só no Wake Lock: não impede a suspensão do Windows nem funciona em segundo plano.
+
+**Consequências.**
+- A configuração da máquina da recepção faz parte do deploy (`docs/deploy.md`).
+- O teste de 8 h roda numa máquina configurada da mesma forma.
