@@ -83,7 +83,7 @@ Campos: `id, title, artist, album, genre, license, license_url, source_url, attr
 - `filename`: sem `/`, `\` ou `..`; deve existir em `media/originals/`
 - `status`: `active` | `inactive`
 - `date_added`: `AAAA-MM-DD`
-- `album` opcional; `duration` preenchida pelo ingest via ffprobe
+- `album` e `duration` opcionais. O ingest não reescreve o CSV (o Excel trava o arquivo aberto); a duração real vem do `ffprobe` no MP3 processado e vai para o `playlist.json`
 
 ---
 

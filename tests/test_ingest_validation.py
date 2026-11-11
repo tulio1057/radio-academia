@@ -224,6 +224,7 @@ class TestMain(CatalogTestCase):
             "--catalog", str(self.catalog),
             "--originals", str(self.originals),
             "--logs", str(self.tmp / "logs"),
+            "--validate-only",
         ])
 
     def read_log(self):

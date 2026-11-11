@@ -1,0 +1,26 @@
+# Configuração do ingest da Rádio Academia.
+# Mudar qualquer valor de [audio] faz o ingest reprocessar todas as faixas
+# (o nome do MP3 de saída inclui um hash destes parâmetros).
+
+[audio]
+# Volume-alvo integrado em LUFS. Faixa permitida: -16 a -14 (Decisão 7).
+target_lufs = -14.0
+
+# Pico verdadeiro máximo em dBTP. -1,5 deixa margem para o encoder MP3.
+true_peak = -1.5
+
+# Faixa de loudness (LRA) tolerada. Valor alto favorece o modo linear do
+# loudnorm, que só sobe/desce o volume sem comprimir a dinâmica.
+loudness_range = 20.0
+
+# MP3 de saída: CBR, entre 128 e 160 kbps.
+bitrate_kbps = 160
+sample_rate = 44100
+
+# Corte de silêncio só nas pontas: trechos abaixo do limiar por pelo menos
+# esta duração, no início ou no fim da faixa.
+silence_threshold_db = -50.0
+silence_min_seconds = 1.0
+
+# Tolerância da verificação do volume da saída (em LU).
+lufs_tolerance = 1.0
