@@ -39,7 +39,14 @@ o site a cada push.
 - Workbox: dependência e etapa de build para um problema de poucas dezenas de linhas.
 
 **Consequências.**
-- Atualizações de versão do cache são manuais (constante no `sw.js`).
+- Atualizações de versão do cache são manuais: aumentar `VERSION` no `sw.js` a cada deploy que
+  mude `index.html`, `app.js`, `shuffle.js`, `style.css` ou a lista de arquivos. Sem isso, o
+  stale-while-revalidate ainda atualiza arquivo por arquivo, mas sem garantia de que todos
+  mudem juntos.
+- O player fica aberto por dias, então ele pede ao navegador para checar versão nova junto com
+  a recarga da playlist (a cada 6 h). Versão nova instalada → a página recarrega sozinha na
+  próxima troca de faixa. Depois do recarregamento a música só volta sozinha com a flag de
+  autoplay (Decisão 8); sem ela, aparece "Clique em ▶".
 - Reavaliar se o SW ficar difícil de manter.
 
 ---

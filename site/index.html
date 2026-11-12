@@ -4,13 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0f1115">
   <title>Rádio Academia</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="style.css">
   <script type="module" src="app.js"></script>
 </head>
 <body>
   <header class="top">
     <span class="brand">Rádio Academia</span>
+    <span id="net" class="net" hidden>Sem internet · tocando músicas baixadas</span>
     <a href="creditos/">Créditos</a>
   </header>
 
@@ -39,10 +44,16 @@
     <p id="status" class="status" role="status" aria-live="polite"></p>
   </main>
 
-  <footer id="credit" class="credit" hidden>
-    <span id="attribution"></span>
-    · <a id="license" rel="license noopener" target="_blank"></a>
-    · <a id="source" target="_blank" rel="noopener">fonte</a>
+  <footer class="foot">
+    <p id="credit" class="credit" hidden>
+      <span id="attribution"></span>
+      · <a id="license" rel="license noopener" target="_blank"></a>
+      · <a id="source" target="_blank" rel="noopener">fonte</a>
+    </p>
+    <p class="offline">
+      <span id="storage"></span>
+      <button id="download" class="btn-text" type="button">Baixar para offline</button>
+    </p>
   </footer>
 
   <audio id="audio" preload="auto"></audio>
