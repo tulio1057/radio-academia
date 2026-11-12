@@ -37,7 +37,7 @@ Este arquivo tem precedência sobre o POCF onde houver conflito (ver "Decisões 
 1. **Ingestão local, sem GitHub Actions no MVP.** Originais de áudio não entram no Git. O ingest roda no Windows do desenvolvedor, gera `playlist.json` e créditos, e esses arquivos são commitados. A integração Git do Cloudflare Pages faz o deploy a cada push.
 2. **Service worker escrito à mão, sem Workbox.** O SW cuida só de estáticos e `playlist.json`; não justifica a dependência.
 3. **O player é o único dono do cache de MP3.** O player baixa cada faixa via `fetch()`, guarda no Cache API (cache `audio-v1`) e toca a partir de blob URL. O SW não intercepta nem guarda MP3. Evita os problemas de cache de respostas `Range`/206 e evita duas cópias com duas políticas de evicção. No máximo dois blobs em memória (faixa atual e próxima), sempre com `URL.revokeObjectURL` ao descartar. Custo aceito: a faixa só começa a tocar após o download completo (~4–5 MB); por isso a próxima é sempre pré-carregada.
-4. **MP3 públicos no R2 durante o MVP, servidos por domínio próprio** (ex.: `audio.<dominio>`), não pelo `r2.dev`, que tem limite de requisições e não é recomendado para produção. Cloudflare Access protege o Pages, não o domínio do bucket. Proteger o áudio exige colocar o domínio do bucket também atrás do Access. Decisão consciente: o conteúdo é CC.
+4. **MP3 públicos no R2 durante o MVP, servidos pelo `r2.dev`** (não há domínio próprio). A Cloudflare indica o `r2.dev` só para desenvolvimento (limite de requisições, sem garantia, sem cache/Access); aceito porque é um player só, de baixo volume, com cache local das faixas. URL base do áudio num único lugar da config. `ponytail: r2.dev; upgrade: Custom Domain no bucket e trocar a URL base`. Cloudflare Access protege o Pages, não o bucket; áudio privado exigiria domínio próprio atrás do Access. Decisão consciente: o conteúdo é CC.
 5. **Lista de licenças aceitas:** `CC0-1.0`, `CC-BY-3.0`, `CC-BY-4.0`. Rejeitar qualquer licença NC (academia é uso comercial), ND e SA no MVP (normalização e corte de silêncio podem ser considerados modificação da obra).
 6. **ECAD:** licença CC não impede cobrança por execução pública se autor/intérprete for filiado a associação de gestão coletiva. Academias são alvo frequente de cobrança. Registrar em `docs/licencas.md`, alertar o cliente por escrito e preferir artistas que declarem publicamente não serem filiados (guardar a evidência em `source_url` ou em `docs/licencas.md`).
 7. **Processamento conservador:** corte de silêncio só nas pontas (abaixo de -50 dB, mínimo ~1 s), nunca no meio. `loudnorm` em duas passagens, alvo configurável entre -14 e -16 LUFS, true peak -1,5 dBTP (margem para o overshoot do encoder MP3).
@@ -113,9 +113,9 @@ Campos: `id, title, artist, album, genre, license, license_url, source_url, attr
 Pré-requisito do upload e do player. Registrar em `docs/deploy.md` (primeira parte):
 - Instalar FFmpeg, rclone e Python via `winget`.
 - Criar bucket R2 e token com escopo restrito ao bucket; remote do rclone configurado fora do repo.
-- Domínio próprio no bucket (Decisão 4).
+- Public Development URL (`r2.dev`) ativado no bucket (Decisão 4).
 - CORS: `GET` e `HEAD` liberados apenas para `http://localhost:<porta>` (desenvolvimento) e o domínio do Pages. Sem CORS o `fetch()` do player não consegue ler o corpo.
-- **Pronto quando:** `rclone lsjson` lista o bucket, e um `fetch()` do console em `localhost` lê um MP3 de teste pelo domínio próprio.
+- **Pronto quando:** `rclone lsjson` lista o bucket, e um `fetch()` do console em `localhost` lê um MP3 de teste pelo `r2.dev`.
 
 ### Fase 4 — Upload e arquivos gerados
 - Upload com `rclone copy --checksum --header-upload "Cache-Control: public, max-age=31536000, immutable"` (o cabeçalho é gravado no upload; os nomes são imutáveis pelo hash). Verificação com `rclone check` ou `lsjson`.
@@ -186,6 +186,7 @@ Pré-requisito do upload e do player. Registrar em `docs/deploy.md` (primeira pa
 |---|---|
 | GitHub Actions | mais de uma pessoa editando o catálogo |
 | Workbox | o SW manual ficar difícil de manter |
-| Access no domínio do bucket R2 | cliente exigir áudio privado |
+| Domínio próprio no bucket R2 | falhas vindas do `r2.dev`, mais de uma unidade ou endereço próprio desejado |
+| Access no domínio do bucket R2 | cliente exigir áudio privado (requer domínio próprio) |
 | Limpeza de órfãos no R2 | custo de armazenamento relevante |
 | Playwright / testes de navegador | deploy em várias unidades |

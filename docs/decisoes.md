@@ -66,22 +66,35 @@ blobs em memória (faixa atual e próxima), sempre liberados com `URL.revokeObje
 
 ---
 
-## 4. MP3 públicos no R2, servidos por domínio próprio
+## 4. MP3 públicos no R2, servidos pelo `r2.dev`
 
-**Contexto.** O Cloudflare Access protege o site no Pages, mas não o bucket R2. O endereço
-`r2.dev` tem limite de requisições e a Cloudflare não o recomenda para produção.
+**Contexto.** O Cloudflare Access protege o site no Pages, mas não o bucket R2. Não há domínio
+próprio disponível para o projeto. Segundo a documentação da Cloudflare, o `r2.dev` tem limite
+de requisições (valor não publicado), é indicado para tráfego de desenvolvimento, não tem
+garantia de confiabilidade e não oferece cache, WAF nem Access.
 
-**Decisão.** No MVP os MP3 são públicos, servidos por um domínio próprio ligado ao bucket
-(ex.: `audio.<dominio>`). O conteúdo é CC, então a exposição é aceitável.
+**Decisão.** No MVP os MP3 são públicos, servidos pelo Public Development URL do bucket
+(`https://pub-<id>.r2.dev`). Decisão consciente, revista em 2026-11-11:
+- o volume é de um player, uma faixa a cada poucos minutos, longe de qualquer limite;
+- o player guarda as faixas no Cache API (Decisão 3) e continua tocando o que está em cache
+  se o `r2.dev` falhar (Fase 6);
+- cache de borda e Access no áudio não agregam: o cache é do player e o conteúdo é CC.
+
+A URL base do áudio fica num único lugar da configuração do ingest.
+`ponytail: r2.dev sem garantia de produção; upgrade: domínio próprio no bucket (Custom Domain), trocar a URL base, rodar o ingest e desativar o r2.dev`.
 
 **Alternativas descartadas.**
-- `r2.dev`: limitado e não indicado para uso contínuo.
-- Domínio do bucket atrás do Access já no MVP: complexidade sem exigência do cliente.
+- Domínio próprio já no MVP (ex.: `audio.<dominio>`): custo e configuração sem necessidade
+  comprovada para uma única recepção.
+- Domínio do bucket atrás do Access: complexidade sem exigência do cliente.
 
 **Consequências.**
-- Exige um domínio gerenciado na Cloudflare.
 - Qualquer pessoa com a URL de um MP3 consegue baixá-lo.
-- Reavaliar se o cliente exigir áudio privado (colocar o domínio do bucket atrás do Access).
+- A Cloudflare pode mudar as regras do `r2.dev` sem aviso; a troca para domínio próprio não
+  exige reenviar arquivos.
+- Comprar domínio quando: os logs do player mostrarem falhas vindas do `r2.dev`, houver mais
+  de uma unidade, ou se quiser endereço próprio para o site.
+- Reavaliar se o cliente exigir áudio privado (exige domínio próprio atrás do Access).
 
 ---
 
