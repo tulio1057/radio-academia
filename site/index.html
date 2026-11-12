@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Rádio Academia</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <span class="brand">Rádio Academia</span>
+    <a href="creditos/">Créditos</a>
+  </header>
+
+  <main class="now">
+    <h1 id="title" class="title">—</h1>
+    <p id="artist" class="artist"></p>
+
+    <div class="progress">
+      <div id="bar" class="bar" role="progressbar" aria-label="Progresso da faixa"
+           aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="fill" class="fill"></div>
+      </div>
+      <div class="times"><span id="elapsed">0:00</span><span id="duration">0:00</span></div>
+    </div>
+
+    <div class="controls">
+      <button id="play" class="btn btn-play" type="button" aria-label="Tocar">
+        <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+        <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+      </button>
+      <button id="next" class="btn btn-next" type="button" aria-label="Próxima música">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l8.5 6L6 18zM16 6h2v12h-2z"/></svg>
+      </button>
+    </div>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+  </main>
+
+  <footer id="credit" class="credit" hidden>
+    <span id="attribution"></span>
+    · <a id="license" rel="license noopener" target="_blank"></a>
+    · <a id="source" target="_blank" rel="noopener">fonte</a>
+  </footer>
+
+  <audio id="audio" preload="auto"></audio>
+</body>
+</html>

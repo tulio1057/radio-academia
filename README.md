@@ -40,6 +40,8 @@ são escritos nas fases correspondentes.
 python scripts/ingest.py                  # valida, processa, envia ao R2 e gera playlist/créditos
 python scripts/ingest.py --validate-only  # só confere o catálogo
 python -m unittest discover -s tests -v   # testes do ingest
+node --test                               # testes do shuffle do player
+python -m http.server 8000 -d site        # player em http://localhost:8000
 ```
 
 ## Requisitos (desenvolvimento)
