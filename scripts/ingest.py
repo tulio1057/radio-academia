@@ -4,13 +4,17 @@ Etapas:
   1. Validação de catalog/tracks.csv (Fase 1).
   2. Processamento de áudio das faixas ativas (Fase 2): corte de silêncio nas pontas,
      loudnorm em duas passagens, MP3 CBR em media/processed/{id}-{hash8}.mp3.
+  3. Upload para o R2 com rclone e confirmação por hash (Fase 4).
+  4. Geração de site/playlist.json e site/creditos/index.html (Fase 4), só com faixas
+     ativas cujo upload foi confirmado. Saídas determinísticas: mesma entrada, mesmos bytes.
 
-Faixa inválida ou com falha de processamento é registrada no log e pulada; o ingest nunca
-aborta por causa de uma faixa. Só aborta (código 2) quando o catálogo ou o config.toml não
-podem ser lidos, ou quando o FFmpeg não está instalado.
+Faixa inválida ou com falha de processamento/upload é registrada no log e pulada; o ingest
+nunca aborta por causa de uma faixa. Só aborta (código 2) quando o catálogo ou o config.toml
+não podem ser lidos, quando FFmpeg ou rclone não estão instalados, ou quando o bucket não
+responde; nesse último caso playlist e créditos não são regenerados.
 
 Uso:
-    python scripts/ingest.py                  # valida e processa
+    python scripts/ingest.py                  # valida, processa, envia e gera as saídas
     python scripts/ingest.py --validate-only  # só valida o CSV
 
 Códigos de saída: 0 = tudo certo, 1 = alguma faixa rejeitada ou com falha, 2 = erro fatal.
@@ -19,12 +23,14 @@ Códigos de saída: 0 = tudo certo, 1 = alguma faixa rejeitada ou com falha, 2 =
 import argparse
 import csv
 import hashlib
+import html
 import json
 import logging
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import tomllib
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -61,6 +67,10 @@ class ConfigError(Exception):
 
 class ProcessingError(Exception):
     """Falha ao processar uma faixa. A faixa é pulada; o ingest continua."""
+
+
+class PublishError(Exception):
+    """Bucket inacessível. Aborta antes de regenerar playlist e créditos."""
 
 
 @dataclass
@@ -243,17 +253,19 @@ AUDIO_LIMITS = {
 }
 
 
-def load_config(path):
-    """Lê e valida a seção [audio] do config.toml. Devolve um dict com todas as chaves de AUDIO_LIMITS."""
+def _read_toml(path):
     try:
         with path.open("rb") as f:
-            data = tomllib.load(f)
+            return tomllib.load(f)
     except FileNotFoundError:
         raise ConfigError(f"config não encontrado: {path}") from None
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"config.toml inválido: {exc}") from None
 
-    audio = data.get("audio", {})
+
+def load_config(path):
+    """Lê e valida a seção [audio] do config.toml. Devolve um dict com todas as chaves de AUDIO_LIMITS."""
+    audio = _read_toml(path).get("audio", {})
     errors = []
     for key, (low, high) in AUDIO_LIMITS.items():
         value = audio.get(key)
@@ -266,16 +278,34 @@ def load_config(path):
     return {key: audio[key] for key in AUDIO_LIMITS}
 
 
+def load_publish_config(path):
+    """Lê e valida a seção [r2]: remote (destino do rclone) e public_base_url (https)."""
+    r2 = _read_toml(path).get("r2", {})
+    errors = []
+    remote = r2.get("remote")
+    if not isinstance(remote, str) or not remote.strip():
+        errors.append("[r2].remote ausente (ex.: \"r2:nome-do-bucket\")")
+    base = r2.get("public_base_url")
+    if not isinstance(base, str) or not _is_https_url(base):
+        errors.append("[r2].public_base_url ausente ou sem https://")
+    if errors:
+        raise ConfigError("config.toml: " + "; ".join(errors))
+    return {"remote": remote.strip(), "public_base_url": base.rstrip("/")}
+
+
 # ---------------------------------------------------------------------------
 # Processamento de áudio (FFmpeg)
 # ---------------------------------------------------------------------------
 
-def run(cmd):
-    """Roda um comando e devolve o resultado. Código de saída diferente de zero vira ProcessingError."""
+def _stderr_tail(result):
+    return " | ".join(result.stderr.strip().splitlines()[-3:])
+
+
+def run(cmd, check=True):
+    """Roda um comando e devolve o resultado. Com check, código diferente de zero vira ProcessingError."""
     result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if result.returncode != 0:
-        tail = " | ".join(result.stderr.strip().splitlines()[-3:])
-        raise ProcessingError(f"{Path(cmd[0]).stem} falhou (código {result.returncode}): {tail}")
+    if check and result.returncode != 0:
+        raise ProcessingError(f"{Path(cmd[0]).stem} falhou (código {result.returncode}): {_stderr_tail(result)}")
     return result
 
 
@@ -484,6 +514,164 @@ def process_all(tracks, originals_dir, processed_dir, cfg):
 
 
 # ---------------------------------------------------------------------------
+# Upload (rclone)
+# ---------------------------------------------------------------------------
+
+# Nomes são imutáveis (hash no nome), então o cache pode ser eterno.
+CACHE_CONTROL = "Cache-Control: public, max-age=31536000, immutable"
+CHECK_LINE_RE = re.compile(r"^([=+*!-]) (.+)$")
+
+
+def parse_check(stdout):
+    """Saída de `rclone check --combined -`: {nome: marcador}.
+
+    = igual nos dois lados; + falta no bucket; * diferente; ! erro ao ler; - só no bucket.
+    """
+    statuses = {}
+    for line in stdout.splitlines():
+        match = CHECK_LINE_RE.match(line.strip())
+        if match:
+            statuses[match.group(2)] = match.group(1)
+    return statuses
+
+
+def _rclone_with_list(args, names):
+    """Roda o rclone restrito a uma lista de arquivos (--files-from-raw)."""
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
+        f.write("\n".join(names) + "\n")
+        listing = f.name
+    try:
+        return run(["rclone"] + args + ["--files-from-raw", listing], check=False)
+    finally:
+        Path(listing).unlink(missing_ok=True)
+
+
+def remote_status(names, local_dir, remote):
+    """Compara os arquivos locais com o bucket (tamanho e MD5). Devolve {nome: marcador}."""
+    result = _rclone_with_list(["check", str(local_dir), remote, "--one-way", "--combined", "-"], names)
+    statuses = parse_check(result.stdout)
+    if result.returncode != 0 and not statuses:
+        raise PublishError(f"rclone check falhou em {remote}: {_stderr_tail(result)}")
+    return statuses
+
+
+def upload(names, local_dir, remote):
+    """Envia ao bucket os arquivos que faltam ou diferem. Devolve (confirmados, enviados).
+
+    Confirmado = idêntico no bucket segundo o rclone check feito depois do envio.
+    ponytail: arquivos antigos (parâmetros mudados, faixa removida) não são apagados e acumulam
+    no bucket; upgrade: comando de limpeza comparando o bucket com o playlist.json.
+    """
+    if not names:
+        return set(), 0
+    status = remote_status(names, local_dir, remote)
+    pending = sorted(n for n in names if status.get(n) != "=")
+    for name in pending:
+        if status.get(name) == "*":
+            log.warning("AVISO %s: difere do arquivo no bucket; reenviando", name)
+        log.info("enviando %s", name)
+    if pending:
+        result = _rclone_with_list(
+            ["copy", str(local_dir), remote, "--checksum", "--header-upload", CACHE_CONTROL], pending
+        )
+        if result.returncode != 0:
+            log.error("rclone copy terminou com código %d: %s", result.returncode, _stderr_tail(result))
+        status.update(remote_status(pending, local_dir, remote))
+    confirmed = {n for n in names if status.get(n) == "="}
+    return confirmed, sum(n in confirmed for n in pending)
+
+
+# ---------------------------------------------------------------------------
+# Saídas geradas (playlist.json e créditos)
+# ---------------------------------------------------------------------------
+
+GENERATED_NOTICE = "Gerado por scripts/ingest.py a partir de catalog/tracks.csv. Não editar à mão."
+LICENSE_NAMES = {"CC0-1.0": "CC0 1.0", "CC-BY-3.0": "CC BY 3.0", "CC-BY-4.0": "CC BY 4.0"}
+PLAYLIST_FIELDS = (
+    "id", "title", "artist", "album", "genre", "license", "license_url", "source_url", "attribution",
+)
+
+
+def playlist_entry(track, processed, base_url):
+    entry = {name: track.data[name] for name in PLAYLIST_FIELDS}
+    entry["url"] = f"{base_url}/{processed.file.name}"
+    entry["duration"] = round(processed.duration, 2)
+    return entry
+
+
+def build_playlist(entries):
+    """JSON determinístico: faixas por id, chaves ordenadas, sem data de geração."""
+    doc = {"_aviso": GENERATED_NOTICE, "version": 1, "tracks": sorted(entries, key=lambda e: e["id"])}
+    return json.dumps(doc, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def build_credits(entries):
+    """Página estática de créditos. Todo texto do catálogo passa por html.escape."""
+    esc = html.escape
+    items = []
+    for e in sorted(entries, key=lambda e: e["id"]):
+        byline = esc(e["artist"]) + (f" · {esc(e['album'])}" if e["album"] else "")
+        items.append(
+            "    <li>\n"
+            f"      <h2>{esc(e['title'])}</h2>\n"
+            f"      <p class=\"by\">{byline}</p>\n"
+            f"      <p>{esc(e['attribution'])}</p>\n"
+            f"      <p><a href=\"{esc(e['license_url'])}\" rel=\"license\">"
+            f"{esc(LICENSE_NAMES.get(e['license'], e['license']))}</a>"
+            f" · <a href=\"{esc(e['source_url'])}\">fonte</a></p>\n"
+            "    </li>"
+        )
+    body = "\n".join(items) if items else "    <li>Nenhuma faixa publicada.</li>"
+    return f"""<!doctype html>
+<!-- {GENERATED_NOTICE} -->
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Créditos — Rádio Academia</title>
+  <style>
+    body {{ margin: 0; padding: 1.5rem 1rem; font: 1.125rem/1.5 system-ui, sans-serif;
+           background: #fff; color: #111; }}
+    main {{ max-width: 48rem; margin: 0 auto; }}
+    ol {{ list-style: none; padding: 0; }}
+    li {{ border-top: 1px solid #ccc; padding: 1rem 0; }}
+    h2 {{ margin: 0; font-size: 1.25rem; }}
+    p {{ margin: .25rem 0; }}
+    .by {{ color: #444; }}
+    a {{ color: #0645ad; }}
+    @media (prefers-color-scheme: dark) {{
+      body {{ background: #111; color: #eee; }}
+      .by {{ color: #bbb; }}
+      li {{ border-color: #444; }}
+      a {{ color: #8ab4f8; }}
+    }}
+  </style>
+</head>
+<body>
+<main>
+  <h1>Créditos</h1>
+  <p>Músicas licenciadas sob Creative Commons. Cada faixa mostra o autor, a licença e a fonte original.</p>
+  <p><a href="../">Voltar ao player</a></p>
+  <ol>
+{body}
+  </ol>
+</main>
+</body>
+</html>
+"""
+
+
+def write_if_changed(path, content):
+    """Grava só se o conteúdo mudou (LF, UTF-8). Devolve True se gravou."""
+    if path.is_file() and path.read_text(encoding="utf-8") == content:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as f:
+        f.write(content)
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Execução
 # ---------------------------------------------------------------------------
 
@@ -513,6 +701,7 @@ def main(argv=None):
     parser.add_argument("--processed", type=Path, default=ROOT / "media" / "processed")
     parser.add_argument("--config", type=Path, default=ROOT / "scripts" / "config.toml")
     parser.add_argument("--logs", type=Path, default=ROOT / "logs")
+    parser.add_argument("--site", type=Path, default=ROOT / "site", help="pasta onde as saídas são geradas")
     parser.add_argument("--validate-only", action="store_true", help="só valida o CSV, sem processar áudio")
     args = parser.parse_args(argv)
 
@@ -521,17 +710,21 @@ def main(argv=None):
 
     try:
         tracks = read_catalog(args.catalog)
-        cfg = None if args.validate_only else load_config(args.config)
+        if not args.validate_only:
+            cfg = load_config(args.config)
+            publish = load_publish_config(args.config)
     except (CatalogError, ConfigError) as exc:
         log.error("%s", exc)
         return 2
 
     if not args.validate_only:
-        missing = [tool for tool in ("ffmpeg", "ffprobe") if not shutil.which(tool)]
+        installers = {"ffmpeg": "Gyan.FFmpeg", "ffprobe": "Gyan.FFmpeg", "rclone": "Rclone.Rclone"}
+        missing = [tool for tool in installers if not shutil.which(tool)]
         if missing:
+            packages = sorted({installers[tool] for tool in missing})
             log.error(
-                "não encontrado no PATH: %s. Instale com: winget install --id Gyan.FFmpeg -e "
-                "(depois abra um terminal novo)", ", ".join(missing),
+                "não encontrado no PATH: %s. Instale com: %s (depois abra um terminal novo)",
+                ", ".join(missing), " e ".join(f"winget install --id {p} -e" for p in packages),
             )
             return 2
 
@@ -541,16 +734,47 @@ def main(argv=None):
     for t in valid:
         log.info("ok %s (%s)", t.data["id"], t.data["status"])
 
-    processed, failed = [], []
-    if not args.validate_only:
-        processed, failed = process_all(valid, args.originals, args.processed, cfg)
+    if args.validate_only:
+        log.info(
+            "fim: %d faixas lidas, %d válidas, %d rejeitadas. Log: %s",
+            len(tracks), len(valid), len(rejected), log_file,
+        )
+        return 1 if rejected else 0
+
+    processed, failed = process_all(valid, args.originals, args.processed, cfg)
+
+    try:
+        confirmed, sent = upload(sorted(p.file.name for p in processed), args.processed, publish["remote"])
+    except PublishError as exc:
         for r in failed:
             log.warning("FALHOU %s", r.message())
+        log.error("%s", exc)
+        log.error("playlist.json e créditos NÃO foram regenerados. Confira a conexão e o rclone.conf.")
+        return 2
+
+    by_id = {t.data["id"]: t for t in valid}
+    entries = []
+    for p in processed:
+        if p.file.name in confirmed:
+            entries.append(playlist_entry(by_id[p.track_id], p, publish["public_base_url"]))
+        else:
+            failed.append(Rejection(by_id[p.track_id].line, p.track_id, ["upload: não confirmado no bucket"]))
+    for r in failed:
+        log.warning("FALHOU %s", r.message())
+
+    outputs = {
+        args.site / "playlist.json": build_playlist(entries),
+        args.site / "creditos" / "index.html": build_credits(entries),
+    }
+    for path, content in outputs.items():
+        state = "atualizado" if write_if_changed(path, content) else "inalterado"
+        log.info("%s %s", state, path)
 
     log.info(
-        "fim: %d faixas lidas, %d válidas, %d rejeitadas; %d processadas (%d novas), %d falhas. Log: %s",
-        len(tracks), len(valid), len(rejected),
-        len(processed), sum(not p.skipped for p in processed), len(failed), log_file,
+        "fim: %d faixas lidas, %d válidas, %d rejeitadas; %d processadas (%d novas), "
+        "%d enviadas, %d na playlist, %d falhas. Log: %s",
+        len(tracks), len(valid), len(rejected), len(processed), sum(not p.skipped for p in processed),
+        sent, len(entries), len(failed), log_file,
     )
     return 1 if rejected or failed else 0
 

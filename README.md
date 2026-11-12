@@ -28,10 +28,19 @@ docs/       decisões, licenças, deploy, operação e testes
 ## Documentação
 
 - [`docs/decisoes.md`](docs/decisoes.md) — decisões de arquitetura e por quê
+- [`docs/deploy.md`](docs/deploy.md) — ferramentas, R2 e (Fase 7) publicação
 - [`CLAUDE.md`](CLAUDE.md) — regras do projeto e plano de execução por fases
 
-Os demais documentos (`licencas.md`, `deploy.md`, `operacao.md`, `testes.md`)
+Os demais documentos (`licencas.md`, `operacao.md`, `testes.md`)
 são escritos nas fases correspondentes.
+
+## Comandos
+
+```powershell
+python scripts/ingest.py                  # valida, processa, envia ao R2 e gera playlist/créditos
+python scripts/ingest.py --validate-only  # só confere o catálogo
+python -m unittest discover -s tests -v   # testes do ingest
+```
 
 ## Requisitos (desenvolvimento)
 

@@ -1,6 +1,15 @@
 # Configuração do ingest da Rádio Academia.
 # Mudar qualquer valor de [audio] faz o ingest reprocessar todas as faixas
 # (o nome do MP3 de saída inclui um hash destes parâmetros).
+# Nenhuma credencial aqui: as chaves do R2 ficam no rclone.conf, fora do repositório.
+
+[r2]
+# Destino do rclone: "<remote>:<bucket>". O remote "r2" é criado conforme docs/deploy.md 1.4.
+remote = "r2:r2dev"
+
+# Endereço público dos MP3, usado no playlist.json. Trocar aqui ao migrar para domínio próprio.
+# ponytail: r2.dev sem garantia de produção (Decisão 4); upgrade: Custom Domain no bucket.
+public_base_url = "https://pub-7de4d1bdc6d249bc8f8a40ef6487038e.r2.dev"
 
 [audio]
 # Volume-alvo integrado em LUFS. Faixa permitida: -16 a -14 (Decisão 7).

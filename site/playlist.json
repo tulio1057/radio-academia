@@ -1,0 +1,32 @@
+{
+  "_aviso": "Gerado por scripts/ingest.py a partir de catalog/tracks.csv. Não editar à mão.",
+  "tracks": [
+    {
+      "album": "Nightwish",
+      "artist": "Dafuqex",
+      "attribution": "\"Bug Rush\" por Dafuqex, CC BY 4.0",
+      "duration": 220.81,
+      "genre": "Eletrônica",
+      "id": "dafuqex-bug-rush",
+      "license": "CC-BY-4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "source_url": "https://archive.org/details/SRS03206",
+      "title": "Bug Rush",
+      "url": "https://pub-7de4d1bdc6d249bc8f8a40ef6487038e.r2.dev/dafuqex-bug-rush-eea91f4c.mp3"
+    },
+    {
+      "album": "Music For Podcasts 5",
+      "artist": "Lee Rosevere",
+      "attribution": "\"Start the Day\" por Lee Rosevere, CC BY 4.0",
+      "duration": 116.31,
+      "genre": "Eletrônica",
+      "id": "leerosevere-start-the-day",
+      "license": "CC-BY-4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "source_url": "https://archive.org/details/leerosevere_musicforpodcasts_5",
+      "title": "Start the Day",
+      "url": "https://pub-7de4d1bdc6d249bc8f8a40ef6487038e.r2.dev/leerosevere-start-the-day-f27e9957.mp3"
+    }
+  ],
+  "version": 1
+}
