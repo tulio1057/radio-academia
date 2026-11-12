@@ -3,7 +3,7 @@
 Passo a passo em PowerShell, no Windows do desenvolvedor.
 
 - **Parte 1 (Fase 3):** ferramentas locais e armazenamento do áudio no Cloudflare R2.
-- **Parte 2 (Fase 7):** Cloudflare Pages, Access e máquina da recepção. Ainda não escrita.
+- **Parte 2 (Fase 7):** Cloudflare Pages, Access, máquina da recepção e custos.
 
 Nos comandos abaixo, troque:
 
@@ -160,3 +160,167 @@ site) em `AllowedOrigins`. Não usar `"*"`.
 | `rclone` tenta criar o bucket e falha | falta `no_check_bucket = true` na seção `[r2]` |
 | `fetch()` falha com erro de CORS | origem diferente da cadastrada (`localhost` ≠ `127.0.0.1`, porta diferente) |
 | `fetch()` responde 429 | limite de requisições do `r2.dev` (Decisão 4); se recorrente, migrar para domínio próprio |
+
+---
+
+## Parte 2 — Publicação e máquina da recepção
+
+Marcadores novos:
+
+| Marcador | Exemplo |
+|---|---|
+| `<PROJETO>` | `radio-academia` (vira `https://radio-academia.pages.dev`) |
+| `<URL_SITE>` | `https://radio-academia.pages.dev` |
+
+### 2.1 Cloudflare Pages ligado ao GitHub
+
+Painel → **Workers & Pages** → **Create application** → **Pages** → **Connect to Git**.
+
+1. Se a conta do GitHub não aparecer: **Add GitHub account** → **Install & Authorize**,
+   escolhendo **Only select repositories** → `radio-academia`.
+2. Selecione o repositório e **Begin setup**:
+   - Project name: `<PROJETO>`. Se o nome estiver ocupado, o painel sugere outro;
+     anote o endereço final (`<URL_SITE>`).
+   - Production branch: `main`.
+   - Framework preset: **None**.
+   - Build command: vazio (não há etapa de build).
+   - Build output directory: `site`.
+3. **Save and Deploy**. Cada push na `main` publica de novo.
+
+O arquivo `site/_headers` faz o Pages servir `sw.js`, `playlist.json` e `manifest.json` com
+`Cache-Control: no-cache`, para que nunca fiquem presos num cache antigo.
+
+### 2.2 CORS do bucket com o endereço do site
+
+Bucket → **Settings** → **CORS Policy** → editar a regra da etapa 1.6:
+
+```json
+[
+  {
+    "AllowedOrigins": ["http://localhost:8000", "<URL_SITE>"],
+    "AllowedMethods": ["GET", "HEAD"],
+    "MaxAgeSeconds": 86400
+  }
+]
+```
+
+Sem barra no fim do endereço. Endereços de prévia (`https://<hash>.<PROJETO>.pages.dev`)
+não precisam tocar áudio e ficam de fora.
+
+### 2.3 Cloudflare Access no site
+
+O Access exige o Zero Trust ativado na conta. Na primeira vez o painel pede um nome de
+equipe (team name) e a escolha de um plano; escolha o **Free** e confira no próprio painel
+o limite de usuários e se ele pede meio de pagamento.
+
+O botão do Pages protege só as prévias. Para proteger também `<URL_SITE>`:
+
+1. **Workers & Pages** → `<PROJETO>` → **Settings** → **General** → **Enable access policy**.
+2. Clique em **Manage** na política criada. Em **Access** → **Applications**, abra a
+   aplicação do projeto → **Configure**.
+3. Em **Public hostname**, apague o `*` do campo **Subdomain** (fica só `<PROJETO>.pages.dev`).
+   Se o painel reclamar de nome repetido, renomeie a aplicação. Salve.
+4. Ainda nessa aplicação:
+   - **Session Duration**: **1 month** (o player fica aberto por dias).
+   - **Policies**: edite a regra de **Allow** e inclua, em **Emails**, o seu e-mail e o
+     e-mail que a recepção vai usar para entrar.
+   - **Login methods**: **One-time PIN** (o Access manda um código para o e-mail).
+5. Volte em **Settings** → **General** do projeto e clique de novo em **Enable access policy**,
+   para recriar a proteção das prévias.
+6. Em **Access** → **Applications** devem existir duas aplicações: `<PROJETO>.pages.dev` e
+   `*.<PROJETO>.pages.dev`.
+
+Comportamento esperado:
+
+- Abrir `<URL_SITE>` numa janela anônima mostra a tela de login do Access.
+- Os MP3 continuam públicos no `r2.dev` (Decisão 4). O Access protege só o site.
+- Se a sessão expirar com o player aberto, ele segue tocando com os arquivos que o service
+  worker já guardou; as atualizações de catálogo voltam depois de um novo login.
+
+### 2.4 Cada atualização do catálogo ou do site
+
+```powershell
+python scripts/ingest.py
+git add catalog site
+git commit -m "Catálogo: <o que mudou>"
+git push
+```
+
+Se `index.html`, `app.js`, `shuffle.js` ou `style.css` mudaram, aumente `VERSION` em
+`site/sw.js` no mesmo commit (Decisão 2). O player aberto na recepção busca a versão nova a
+cada 6 h e recarrega na troca de música.
+
+### 2.5 Máquina da recepção
+
+Feito uma vez, no Windows da recepção, com o usuário que fica logado nela.
+
+**Atalho na inicialização.** O Chrome usa um perfil só do player, para que as flags valham
+mesmo se outro Chrome já estiver aberto. Troque `<URL_SITE>` e rode no PowerShell:
+
+```powershell
+$url    = "<URL_SITE>"
+$chrome = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+            "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe") |
+          Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $chrome) { throw "Chrome não encontrado" }
+$perfil = "$env:LOCALAPPDATA\RadioAcademia\Chrome"
+$flags  = "--app=$url --user-data-dir=`"$perfil`" --autoplay-policy=no-user-gesture-required --no-first-run"
+$shell  = New-Object -ComObject WScript.Shell
+foreach ($pasta in @([Environment]::GetFolderPath("Startup"), [Environment]::GetFolderPath("Desktop"))) {
+  $atalho = $shell.CreateShortcut("$pasta\Rádio Academia.lnk")
+  $atalho.TargetPath = $chrome
+  $atalho.Arguments  = $flags
+  $atalho.Save()
+}
+```
+
+Isso cria o atalho na pasta de inicialização (abre ao entrar no Windows) e outro na área de
+trabalho (para abrir à mão).
+
+**Primeiro acesso.** Abra pelo atalho da área de trabalho, entre com o e-mail no Access e
+clique em **Baixar para offline**. Feche e abra pelo atalho de novo: deve tocar sem clique.
+Se aparecer "Clique em ▶", a flag de autoplay não foi aceita; nesse caso a operação diária
+fica "um clique em ▶ ao ligar" (Decisão 8).
+
+**Energia.** Sem suspensão e sem desligar a tela na tomada (rode no PowerShell):
+
+```powershell
+powercfg /change standby-timeout-ac 0
+powercfg /change hibernate-timeout-ac 0
+powercfg /change monitor-timeout-ac 0
+```
+
+Se a recepção desligar a máquina à noite, nada mais é preciso. Se ela ficar ligada direto,
+ajuste em **Configurações** → **Windows Update** → **Horário ativo** para cobrir o horário
+de funcionamento, evitando reinício no meio do expediente.
+
+**Entrada no Windows.** O atalho só roda depois que alguém entra no Windows. Se a máquina
+liga sem ninguém por perto, decidir com o responsável pela máquina entre entrar à mão ao
+ligar ou configurar o login automático do Windows (trade-off de segurança dele, não do player).
+
+### 2.6 Custos
+
+Consultado em 2026-11-12 nas páginas de preços e limites da Cloudflare. Conferir de novo
+antes de mudanças grandes no catálogo.
+
+| Serviço | Grátis por mês | Acima disso |
+|---|---|---|
+| R2 armazenamento (Standard) | 10 GB-mês | US$ 0,015 / GB-mês |
+| R2 operações classe A (escrita, listagem) | 1 milhão | US$ 4,50 / milhão |
+| R2 operações classe B (leitura) | 10 milhões | US$ 0,36 / milhão |
+| R2 saída de dados (inclusive `r2.dev`) | sem cobrança | sem cobrança |
+| Pages | 500 builds; até 20.000 arquivos; 25 MiB por arquivo | — |
+| Access (Zero Trust Free) | conferir limite de usuários no painel | — |
+
+Estimativa do MVP: 100 faixas × ~4,5 MB ≈ 0,45 GB armazenados. Uma recepção tocando 12 h por
+dia faz da ordem de 15 leituras por hora (faixa + teste de rede eventual), cerca de 6 mil
+por mês, e o cache local reduz ainda mais. O ingest faz poucas operações de escrita por
+execução. Tudo bem dentro da faixa grátis; o R2 exige meio de pagamento cadastrado mesmo assim.
+
+### 2.7 Verificação (critério de pronto da Fase 7)
+
+1. `<URL_SITE>` numa janela anônima pede login do Access.
+2. Depois do login, o player toca. No console (F12), as linhas `[radio] baixada ...` mostram
+   o download pelo `r2.dev`, sem erro de CORS.
+3. Na máquina de teste, reiniciar o Windows: o player abre sozinho em janela própria e toca
+   sem clique.

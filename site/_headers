@@ -1,0 +1,12 @@
+# Cabeçalhos do Cloudflare Pages (o Pages aplica este arquivo e não o publica).
+# Arquivos que mudam a cada deploy sem mudar de nome: o navegador sempre confere com o servidor.
+# O service worker em especial nunca pode ficar preso num cache longo (Fase 7).
+
+/sw.js
+  Cache-Control: no-cache
+
+/playlist.json
+  Cache-Control: no-cache
+
+/manifest.json
+  Cache-Control: no-cache

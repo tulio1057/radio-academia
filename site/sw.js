@@ -8,7 +8,7 @@
 // Isso instala um service worker novo com todos os arquivos da mesma versão juntos;
 // o player recarrega sozinho na troca de faixa.
 
-const VERSION = 1;
+const VERSION = 2;
 const CACHE = `static-v${VERSION}`;
 
 const PRECACHE = [
