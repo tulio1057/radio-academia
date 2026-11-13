@@ -3,7 +3,7 @@
 Passo a passo em PowerShell, no Windows do desenvolvedor.
 
 - **Parte 1 (Fase 3):** ferramentas locais e armazenamento do áudio no Cloudflare R2.
-- **Parte 2 (Fase 7):** Cloudflare Pages, Access, máquina da recepção e custos.
+- **Parte 2 (Fase 7):** Cloudflare Pages, máquina da recepção e custos (Access opcional).
 
 Nos comandos abaixo, troque:
 
@@ -207,7 +207,10 @@ Bucket → **Settings** → **CORS Policy** → editar a regra da etapa 1.6:
 Sem barra no fim do endereço. Endereços de prévia (`https://<hash>.<PROJETO>.pages.dev`)
 não precisam tocar áudio e ficam de fora.
 
-### 2.3 Cloudflare Access no site
+### 2.3 Cloudflare Access no site (opcional, não usado)
+
+O site é público por decisão do cliente (Decisão 9). Estes passos ficam para o caso de
+um dia ser preciso exigir login.
 
 O Access exige o Zero Trust ativado na conta. Na primeira vez o painel pede um nome de
 equipe (team name) e a escolha de um plano; escolha o **Free** e confira no próprio painel
@@ -277,8 +280,7 @@ foreach ($pasta in @([Environment]::GetFolderPath("Startup"), [Environment]::Get
 Isso cria o atalho na pasta de inicialização (abre ao entrar no Windows) e outro na área de
 trabalho (para abrir à mão).
 
-**Primeiro acesso.** Abra pelo atalho da área de trabalho, entre com o e-mail no Access e
-clique em **Baixar para offline**. Feche e abra pelo atalho de novo: deve tocar sem clique.
+**Primeiro acesso.** Abra pelo atalho da área de trabalho e clique em **Baixar para offline**. Feche e abra pelo atalho de novo: deve tocar sem clique.
 Se aparecer "Clique em ▶", a flag de autoplay não foi aceita; nesse caso a operação diária
 fica "um clique em ▶ ao ligar" (Decisão 8).
 
@@ -310,7 +312,6 @@ antes de mudanças grandes no catálogo.
 | R2 operações classe B (leitura) | 10 milhões | US$ 0,36 / milhão |
 | R2 saída de dados (inclusive `r2.dev`) | sem cobrança | sem cobrança |
 | Pages | 500 builds; até 20.000 arquivos; 25 MiB por arquivo | — |
-| Access (Zero Trust Free) | conferir limite de usuários no painel | — |
 
 Estimativa do MVP: 100 faixas × ~4,5 MB ≈ 0,45 GB armazenados. Uma recepção tocando 12 h por
 dia faz da ordem de 15 leituras por hora (faixa + teste de rede eventual), cerca de 6 mil
@@ -319,8 +320,8 @@ execução. Tudo bem dentro da faixa grátis; o R2 exige meio de pagamento cadas
 
 ### 2.7 Verificação (critério de pronto da Fase 7)
 
-1. `<URL_SITE>` numa janela anônima pede login do Access.
-2. Depois do login, o player toca. No console (F12), as linhas `[radio] baixada ...` mostram
+1. `<URL_SITE>` abre o player.
+2. O player toca. No console (F12), as linhas `[radio] baixada ...` mostram
    o download pelo `r2.dev`, sem erro de CORS.
 3. Na máquina de teste, reiniciar o Windows: o player abre sozinho em janela própria e toca
    sem clique.

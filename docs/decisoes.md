@@ -1,11 +1,11 @@
 # Decisões de arquitetura
 
-Registro das decisões que ajustam a especificação original (`docs/POCF.md`).
+Registro das decisões do projeto, na ordem em que foram tomadas.
 Onde houver conflito, vale este documento e o `CLAUDE.md`.
 
 Cada decisão tem: **contexto**, **decisão**, **alternativas descartadas** e **consequências**.
 
-Status: aguardando revisão do desenvolvedor (critério de pronto da Fase 0).
+Status: revisado pelo desenvolvedor; decisões novas são acrescentadas ao fim.
 
 ---
 
@@ -75,6 +75,8 @@ blobs em memória (faixa atual e próxima), sempre liberados com `URL.revokeObje
 
 ## 4. MP3 públicos no R2, servidos pelo `r2.dev`
 
+> **Substituída pela Decisão 10 em 2026-11-12** (player passou a ser pessoal, com áudio privado no Firebase). Mantida como histórico.
+
 **Contexto.** O Cloudflare Access protege o site no Pages, mas não o bucket R2. Não há domínio
 próprio disponível para o projeto. Segundo a documentação da Cloudflare, o `r2.dev` tem limite
 de requisições (valor não publicado), é indicado para tráfego de desenvolvimento, não tem
@@ -107,6 +109,8 @@ A URL base do áudio fica num único lugar da configuração do ingest.
 
 ## 5. Licenças aceitas: CC0-1.0, CC-BY-3.0, CC-BY-4.0
 
+> **Substituída pela Decisão 10 em 2026-11-12** (player passou a ser pessoal, com áudio privado no Firebase). Mantida como histórico.
+
 **Contexto.** A academia faz uso comercial da música. O ingest modifica o áudio
 (normalização de volume e corte de silêncio nas pontas).
 
@@ -125,6 +129,8 @@ A URL base do áudio fica num único lugar da configuração do ingest.
 ---
 
 ## 6. ECAD
+
+> **Substituída pela Decisão 10 em 2026-11-12** (player passou a ser pessoal, com áudio privado no Firebase). Mantida como histórico.
 
 **Contexto.** Uma licença CC não impede a cobrança por execução pública quando o autor ou
 intérprete é filiado a uma associação de gestão coletiva. Academias são alvo frequente
@@ -181,3 +187,74 @@ a aba visível. A recepcionista não deve precisar configurar nada.
 **Consequências.**
 - A configuração da máquina da recepção faz parte do deploy (`docs/deploy.md`).
 - O teste de 8 h roda numa máquina configurada da mesma forma.
+
+---
+
+## 9. Site público, sem Cloudflare Access
+
+> **Substituída pela Decisão 10 em 2026-11-12** (player passou a ser pessoal, com áudio privado no Firebase). Mantida como histórico.
+
+**Contexto.** O plano original protegia o site com Cloudflare Access. O cliente informou em
+2026-11-12 que não precisa de login. O áudio já é público (Decisão 4), a playlist e os
+créditos só listam músicas CC, e o player não tem nenhum dado pessoal nem ação sensível.
+
+**Decisão.** `https://radio-academia.pages.dev` fica aberto, sem Access.
+
+**Alternativas descartadas.**
+- Access com sessão de 1 mês: exige Zero Trust, cadastro de e-mails e novo login a cada mês
+  na recepção, para proteger conteúdo que já é público.
+
+**Consequências.**
+- Qualquer pessoa com o link abre o player. Não há custo extra: os MP3 tocam do cache local e
+  o R2 não cobra saída de dados.
+- Sem tela de login, a recepção nunca fica presa num login expirado.
+- O código continua compatível com Access (manifesto com `use-credentials`, service worker que
+  não guarda redirecionamentos). Reativar: `docs/deploy.md`, etapa 2.3.
+
+---
+
+## 10. Player pessoal com áudio privado no Firebase
+
+**Contexto.** Em 2026-11-12 o dono informou que a rádio deixou de ser para a academia e passou
+a ser um player pessoal, para ouvir em casa e em vários aparelhos, com músicas baixadas pelo
+botão de download que a própria fonte oferece (ex.: Sua Música). Essas músicas não têm licença
+Creative Commons, então não podem ficar em lugar público: o `r2.dev` é sempre público (o
+Cloudflare Access não o protege) e o site não tem login. O dono escolheu o Firebase.
+
+Consultado em 2026-11-12 na documentação do Firebase:
+- Cloud Storage exige o plano Blaze (pagamento por uso) desde 2026-02-03.
+- Sem custo no Blaze, para buckets `*.firebasestorage.app` em us-central1, us-east1 ou us-west1:
+  5 GB-mês guardados e 100 GB/mês baixados.
+- Authentication: até 50 mil usuários ativos por mês sem custo.
+- Firestore limita documentos a 1 MiB: não serve para guardar MP3.
+
+**Decisão.**
+- Login com Google pelo Firebase Authentication, no próprio site (sem Cloudflare Access).
+- MP3 e `playlist.json` num bucket do Cloud Storage do Firebase. Regra de segurança: leitura só
+  para o UID do dono; escrita pelo navegador negada (só o ingest escreve).
+- O ingest envia pelo rclone (backend `gcs`) com uma conta de serviço restrita ao bucket; a
+  chave JSON fica fora do repositório.
+- `playlist.json` deixa de ser publicado em `site/` e de ir para o Git: nomes de músicas pessoais
+  não ficam em nenhum arquivo público.
+- O player baixa a lista e as faixas com o token do login (`Authorization: Firebase <token>`) e
+  segue a Decisão 3: download inteiro → Cache API → blob URL.
+- Catálogo sem campos de licença; página de créditos removida.
+- Alerta de orçamento no Google Cloud para avisar se o uso sair da faixa sem custo.
+
+**Alternativas descartadas.**
+- Baixar de YouTube (por biblioteca ou conversor): viola os termos do YouTube e copia música sem
+  autorização de quem tem os direitos.
+- Player do YouTube incorporado: permitido, mas tem anúncios, exige o vídeo visível e não
+  funciona offline; o dono não quis.
+- Cloudflare R2 com domínio próprio atrás do Access: menos mudança de código e 10 GB sem custo,
+  mas exige comprar domínio; o dono preferiu o Firebase.
+- Pasta local no PC: grátis e totalmente privada, mas só funciona num computador.
+
+**Consequências.**
+- Primeiro serviço com estado no projeto e primeira dependência JavaScript (SDK do Firebase
+  Auth, por CDN com versão fixa).
+- Cartão cadastrado no Google Cloud; acima de 5 GB (~1.100 músicas de 4,5 MB) há cobrança.
+- O site no Pages continua público, mas sem login não mostra nem pede nenhuma música.
+- O uso é pessoal: tocar essas músicas em público (ex.: na academia) seria execução pública
+  sem licença e voltaria a envolver o ECAD.
+- O R2 e o `r2.dev` são desativados na Etapa 5.
